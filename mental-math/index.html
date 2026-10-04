@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mental Math Buddy</title>
+<style>
+  :root{
+    --bg:#1b1f2a; --body:#f2b705; --body-dark:#c99700; --screen:#b9d6a3; --ink:#1d2a14;
+    --key:#fff6dc; --key-edge:#d8c48a; --accent:#e4572e; --good:#2e9e5b; --bad:#d64045;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);
+    font-family:ui-rounded,"Trebuchet MS",system-ui,sans-serif;color:var(--ink);padding:16px}
+  .toy{width:min(420px,100%);background:var(--body);border-radius:36px 36px 28px 28px;padding:20px;
+    box-shadow:0 10px 0 var(--body-dark),0 24px 40px rgba(0,0,0,.5)}
+  h1{margin:4px 0 12px;font-size:1.1rem;letter-spacing:.12em;text-transform:uppercase;text-align:center}
+  .screen{background:var(--screen);border-radius:14px;padding:14px 16px;min-height:150px;
+    box-shadow:inset 0 4px 10px rgba(0,0,0,.35);font-family:"Courier New",monospace;display:flex;flex-direction:column;justify-content:space-between}
+  .status{display:flex;justify-content:space-between;font-size:.85rem;opacity:.75}
+  .q{font-size:2.4rem;font-weight:700;text-align:center;margin:10px 0 4px;min-height:3rem}
+  .a{font-size:1.8rem;text-align:center;min-height:2.2rem;border-bottom:2px dashed rgba(0,0,0,.3)}
+  .msg{text-align:center;font-size:.95rem;min-height:1.3rem;margin-top:6px}
+  .msg.good{color:var(--good)} .msg.bad{color:var(--bad)}
+  .modes{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:14px 0 8px}
+  button{font:inherit;cursor:pointer;border:0}
+  .mode{background:var(--accent);color:#fff;border-radius:10px;padding:10px 0;font-size:1.3rem;font-weight:700;box-shadow:0 4px 0 #a63a1c}
+  .mode[aria-pressed=true]{background:#2b3a67;box-shadow:0 4px 0 #161f3d}
+  .opts{display:flex;gap:8px;align-items:center;justify-content:space-between;font-size:.85rem;margin-bottom:10px}
+  select{font:inherit;padding:6px;border-radius:8px;border:2px solid var(--body-dark);background:var(--key)}
+  .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .key{background:var(--key);border-radius:12px;padding:14px 0;font-size:1.5rem;font-weight:700;box-shadow:0 4px 0 var(--key-edge)}
+  .key:active,.mode:active{transform:translateY(3px);box-shadow:none}
+  .key.go{background:var(--good);color:#fff;box-shadow:0 4px 0 #1f6e3f}
+  .key.clr{background:var(--bad);color:#fff;box-shadow:0 4px 0 #962c30}
+  .foot{display:flex;justify-content:space-between;margin-top:12px;font-size:.8rem}
+  .foot button{background:transparent;text-decoration:underline;color:var(--ink)}
+  .note{max-width:420px;color:#9aa3b8;font-size:.75rem;text-align:center;margin-top:14px}
+</style>
+</head>
+<body>
+<main>
+  <div class="toy" role="application" aria-label="Mental Math Buddy">
+    <h1>Mental Math Buddy</h1>
+    <div class="screen" aria-live="polite">
+      <div class="status"><span id="round">Press a mode!</span><span id="score">★ 0</span></div>
+      <div>
+        <div class="q" id="q">? + ?</div>
+        <div class="a" id="a"></div>
+      </div>
+      <div class="msg" id="msg"></div>
+    </div>
+
+    <div class="modes" role="group" aria-label="Operation">
+      <button class="mode" data-op="+" aria-pressed="false" aria-label="Addition">+</button>
+      <button class="mode" data-op="-" aria-pressed="false" aria-label="Subtraction">−</button>
+      <button class="mode" data-op="*" aria-pressed="false" aria-label="Multiplication">×</button>
+      <button class="mode" data-op="/" aria-pressed="false" aria-label="Division">÷</button>
+      <button class="mode" data-op="?" aria-pressed="false" aria-label="Mixed">?</button>
+    </div>
+
+    <div class="opts">
+      <label>Level
+        <select id="level"><option value="1">1 · Easy</option><option value="2" selected>2 · Medium</option><option value="3">3 · Hard</option></select>
+      </label>
+      <label><input type="checkbox" id="voice" checked> Voice</label>
+      <label><input type="checkbox" id="timer"> Beat the clock</label>
+    </div>
+
+    <div class="pad" id="pad"></div>
+    <div class="foot"><button id="repeat">🔊 Repeat</button><button id="skip">Skip →</button></div>
+  </div>
+  <p class="note">An original practice game inspired by the classic talking-toy style of mental arithmetic drills. Speech uses your browser's built-in voice.</p>
+</main>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const ROUNDS = 10;
+  const SPOKEN = {'+':'plus','-':'minus','*':'times','/':'divided by'};
+  const SYMBOL = {'+':'+','-':'−','*':'×','/':'÷'};
+  const PRAISE = ['Great job!','You got it!','Nice one!','Correct!','Brilliant!'];
+  const OOPS = ['Not quite. Try again!','Oops! Have another go.','Close! Try again.'];
+
+  let mode = null, q = null, input = '', score = 0, n = 0, tries = 0, streak = 0, tick = null, left = 0;
+
+  const rnd = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
+  const say = text => {
+    if (!$('voice').checked || !('speechSynthesis' in window)) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 0.95; u.pitch = 1.1;
+    speechSynthesis.speak(u);
+  };
+  const setMsg = (t, cls = '') => { $('msg').textContent = t; $('msg').className = 'msg ' + cls; };
+
+  function makeQuestion(op) {
+    const L = +$('level').value;
+    const max = [10, 12, 20][L - 1];
+    let a, b;
+    if (op === '+') { a = rnd(1, max * (L === 3 ? 5 : L)); b = rnd(1, max * (L === 3 ? 5 : L)); return {a, b, op, ans: a + b}; }
+    if (op === '-') { a = rnd(2, max * (L === 3 ? 5 : L)); b = rnd(1, a); return {a, b, op, ans: a - b}; }
+    if (op === '*') { a = rnd(2, max); b = rnd(2, L === 1 ? 5 : 12); return {a, b, op, ans: a * b}; }
+    b = rnd(2, L === 1 ? 5 : 12); const ans = rnd(2, max); return {a: b * ans, b, op: '/', ans};
+  }
+
+  function nextQuestion() {
+    if (n >= ROUNDS) return finish();
+    n++; tries = 0; input = '';
+    const op = mode === '?' ? '+-*/'[rnd(0, 3)] : mode;
+    q = makeQuestion(op);
+    $('round').textContent = `Question ${n}/${ROUNDS}`;
+    $('q').textContent = `${q.a} ${SYMBOL[q.op]} ${q.b}`;
+    $('a').textContent = '';
+    setMsg('');
+    say(`${q.a} ${SPOKEN[q.op]} ${q.b}?`);
+    startClock();
+  }
+
+  function startClock() {
+    clearInterval(tick);
+    if (!$('timer').checked) return;
+    left = 15;
+    tick = setInterval(() => {
+      left--; $('round').textContent = `Question ${n}/${ROUNDS} · ${left}s`;
+      if (left <= 0) { clearInterval(tick); streak = 0; setMsg(`Time! It was ${q.ans}.`, 'bad'); say(`Time's up. The answer was ${q.ans}`); setTimeout(nextQuestion, 2200); }
+    }, 1000);
+  }
+
+  function submit() {
+    if (!q || input === '') return;
+    if (+input === q.ans) {
+      clearInterval(tick);
+      const pts = tries === 0 ? 10 : 5; score += pts; streak++;
+      $('score').textContent = '★ ' + score;
+      const p = PRAISE[rnd(0, PRAISE.length - 1)] + (streak >= 3 ? ` ${streak} in a row!` : '');
+      setMsg(p, 'good'); say(p); q = null;
+      setTimeout(nextQuestion, 1400);
+    } else {
+      tries++; streak = 0; input = ''; $('a').textContent = '';
+      if (tries >= 3) {
+        clearInterval(tick);
+        setMsg(`The answer is ${q.ans}.`, 'bad'); say(`The answer is ${q.ans}`); q = null;
+        setTimeout(nextQuestion, 2200);
+      } else { const o = OOPS[rnd(0, OOPS.length - 1)]; setMsg(o, 'bad'); say(o); }
+    }
+  }
+
+  function finish() {
+    clearInterval(tick); q = null;
+    const msg = score >= 90 ? 'Perfect! Math whiz!' : score >= 60 ? 'Awesome work!' : 'Good practice. Go again!';
+    $('round').textContent = 'All done!'; $('q').textContent = `★ ${score}`; $('a').textContent = '';
+    setMsg(msg, 'good'); say(`All done. You scored ${score} points. ${msg}`);
+    mode = null; document.querySelectorAll('.mode').forEach(b => b.setAttribute('aria-pressed', 'false'));
+  }
+
+  function press(k) {
+    if (!q) return;
+    if (k === 'C') input = '';
+    else if (k === 'Go') return submit();
+    else if (input.length < 4) input += k;
+    $('a').textContent = input;
+  }
+
+  // keypad
+  ['7','8','9','4','5','6','1','2','3','C','0','Go'].forEach(k => {
+    const b = document.createElement('button');
+    b.className = 'key' + (k === 'Go' ? ' go' : k === 'C' ? ' clr' : '');
+    b.textContent = k === 'Go' ? '✔' : k;
+    b.setAttribute('aria-label', k === 'Go' ? 'Enter' : k === 'C' ? 'Clear' : k);
+    b.onclick = () => press(k);
+    $('pad').appendChild(b);
+  });
+  addEventListener('keydown', e => {
+    if (/^\d$/.test(e.key)) press(e.key);
+    else if (e.key === 'Enter') press('Go');
+    else if (e.key === 'Backspace' || e.key === 'Escape') press('C');
+  });
+
+  document.querySelectorAll('.mode').forEach(b => b.onclick = () => {
+    mode = b.dataset.op; score = 0; n = 0; streak = 0; $('score').textContent = '★ 0';
+    document.querySelectorAll('.mode').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    nextQuestion();
+  });
+  $('repeat').onclick = () => q && say(`${q.a} ${SPOKEN[q.op]} ${q.b}?`);
+  $('skip').onclick = () => { if (q) { clearInterval(tick); streak = 0; nextQuestion(); } };
+})();
+</script>
+</body>
+</html>
